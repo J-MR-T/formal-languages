@@ -1,13 +1,15 @@
 #!/usr/bin/env julia
 using Lazy
+using Combinatorics
 
-State = Union{Int,String}
-Alphabet = Set{Char}
+State = Union{Int,String,Any}
+Character = Char
+Alphabet = Set{Character}
 
 struct DFA
     Q:: Set{State}
     Σ:: Alphabet
-    δ:: Dict{Tuple{State,Char},State}
+    δ:: Dict{Tuple{State,Character},State}
     q0:: State
     F:: Set{State}
 end
@@ -15,7 +17,7 @@ end
 struct NFA
     Q:: Set{State}
     Σ:: Alphabet
-    δ:: Dict{Tuple{State,Char},Set{State}}
+    δ:: Dict{Tuple{State,Character},Set{State}}
     q0:: State
     F:: Set{State}
 end
@@ -23,7 +25,11 @@ end
 ∅=Set([])
 
 function concatenate(A,B)
-    unique([a*b for a in A for b in B])
+    unique([a*b for a ∈ A for b ∈ B])
+end
+
+function reverseL(L)
+    map(reverse,L)
 end
 
 function languageToTheN(A,n)
@@ -33,6 +39,7 @@ function languageToTheN(A,n)
         return @>> languageToTheN(A,n-1) concatenate(A)
     end
 end
+
 
 function kleen(A)
     @>> Lazy.range(0) Lazy.map(x -> languageToTheN(A,x))
@@ -67,38 +74,6 @@ function recognizeDFA(A,w)
     return currentState ∈ F
 end
 
-function recognizeNFA(A,w)
-    Q = A.Q
-    Σ = A.Σ
-    δ = A.δ
-    q0 = A.q0
-    F = A.F
-    if q0 ∉ Q
-        error("q0 is not in Q")
-    end
-    currentPossibleStates = Set([q0])
-    for c in w
-        if c ∉ Σ
-            error("Current character ('$c') is not in Σ")
-        end
-        oldStates = currentPossibleStates
-        currentPossibleStatesArray = [(if haskey(δ,(q,c));
-                δ[(q,c)];
-            else;
-                ∅;
-            end)
-            for q in currentPossibleStates]
-        currentPossibleStates = reduce(∪,currentPossibleStatesArray)
-        # println(currentPossibleStates)
-        if currentPossibleStates ⊈ Q
-            error("δ[($oldStates,$c)]⊈ Q")
-        end 
-    end
-
-    # println(currentPossibleStates∩ F)
-    return currentPossibleStates ∩ F ≠ ∅
-end
-
 function L_FA(A; limit = 0, group = false)
     if typeof(A) == DFA 
         recognize=recognizeDFA
@@ -125,6 +100,109 @@ function L_FA(A; limit = 0, group = false)
         @>> kleen(Σ) Lazy.map(seq) Lazy.map(list -> Lazy.map(w-> (
         (w, recognize(A,w))
         ),list)) takeFnc(limit)
+    end
+end
+
+flattenVectorOfSets(X::Vector{Set{Any}})=reduce(∪,X,init=∅)
+
+function recognizeNFA(A,w)
+    Q = A.Q
+    Σ = A.Σ
+    δ = A.δ
+    q0 = A.q0
+    F = A.F
+    if q0 ∉ Q
+        error("q0 is not in Q")
+    end
+    currentPossibleStates = Set([q0])
+    for c ∈ w
+        if c ∉ Σ
+            error("Current character ('$c') is not in Σ")
+        end
+        oldStates = currentPossibleStates
+        currentPossibleStatesArray = [
+            (if haskey(δ,(q,c));
+                δ[(q,c)];
+            else;
+                ∅;
+            end)
+            for q ∈ currentPossibleStates]
+        currentPossibleStates = flattenVectorOfSets(currentPossibleStatesArray)
+        # println(currentPossibleStates)
+        if currentPossibleStates ⊈ Q
+            error("δ[($oldStates,$c)]⊈ Q")
+        end 
+    end
+
+    # println(currentPossibleStates∩ F)
+    return currentPossibleStates ∩ F ≠ ∅
+end
+
+
+# struct TokenTreeLeaf
+#     isEmpty::Bool
+#     character::Character
+# end
+#
+#
+# struct TokenTreeInnerNode
+#     type::@enum Concatenation,KleeneStar,Union
+#     children::Tuple{Union{TokenTreeLeaf,TokenTreeInnerNode}, Union{TokenTreeLeaf,TokenTreeInnerNode}} # for the star only the first and second elements of the tuple are used
+# end
+#
+# TokenTree=Union{TokenTreeLeaf,TokenTreeInnerNode}
+#
+#
+# function parseRegEx(regexString::String)
+#
+#     collectString = ""
+#     for i ∈ [1:length(regexString)]
+#         c = regexString[i]
+#         if c == '*'
+#
+#         elseif c == '|'
+#
+#         elseif collectString == ""
+#             collectString = c
+#         else
+#             regex = regexString
+#             tokenTree = (Concatenation,ParsedRegEx(collectString),ParsedRegEx(c))
+#         end
+#     end
+#     parsedRegEx = ParsedRegEx(regexString,tokens)
+# end
+#
+# function L_RegEx(regex::ParsedRegEx)
+#
+# end
+
+E = 0:2:8
+O = map(x->x+1,E)
+function count(w,M)
+    if w == ""
+        return 0
+    else
+        map(bool -> bool ? 1 : 0, [parse(Int, c) ∈ M for c in w]) |> sum
+    end
+end
+
+function powersetconstruction(A::NFA)
+    Σ = A.Σ
+    q0 = Set(A.q0)
+
+    δ=Dict{Tuple{Set{State},Char},Set{State}}
+    currentPossibleStates = q0
+    # TODO end condition
+    # TODO rewrite this with branching for each c
+    for c ∈ Σ
+        newPossibleStatesByState = [(q,A.δ[(q,c)]) for q ∈ currentPossibleStates]
+        newPossibleStates = map((_,set)->set,newPossibleStatesByState) |> flattenVectorOfSets
+        for (qFrom,qToSet) ∈ newPossibleStatesByState
+            #TODO think about how to encode the set as an Int, for now a string will do
+            qTo = join(qToSet,"/")
+            push!(δ,(qFrom,c)=>qTo)
+        end
+        currentPossibleStates=newPossibleStates
     end
 end
 
@@ -216,3 +294,54 @@ end
 #     end
 #     joiner(resultOrVector)
 # end
+
+Terminal=Char
+NonTerminal=Char
+
+struct CFG
+    V:: Vector{NonTerminal}
+    Σ:: Vector{Terminal}
+    P:: Dict{NonTerminal,Vector{Vector{Union{Terminal,NonTerminal}}}}
+    S:: NonTerminal
+    # first occuring NonTerm is S, uppercase letters are non-Terms, lower case are terms
+    # CFG(P)=(
+    #     V=P.keys ∪ [ v for (_,arr) in P.items for v in arr if isuppercase(v)],
+    #     Σ=[  ]
+    # )
+end
+
+function recognizeCFG(G, w)
+    V = G.V
+    Σ = G.Σ
+    P = G.P
+    S = G.S
+    
+end
+
+function CYK(G,w)
+    V = G.V
+    P = G.P
+    n = length(w)
+    v = Array{Vector{NonTerminal}}(undef,n,n)
+
+    for i in 1:n
+        v[i,i]=unique([A for A in V, p in P if [w[i]]∈ P[A] ])
+    end
+
+    for jMinusI in 1:(n-1)
+        # for jMinusI=0: 11, 22, 33, ..., nn: already done in the base case above
+        for i in 1:(n-jMinusI)
+            j=i+jMinusI
+            v[i,j] = unique([ A for k in i:(j-1) for  A in V, B in v[i,k], C in v[k+1,j] if ([B,C] in P[A]) ])
+        end
+    end
+
+    EasyOutputMatrix=Matrix{Vector{NonTerminal}}(undef,n,n)
+    for jMinusI in 0:(n)
+        for i in 1:(n-jMinusI)
+            j=i+jMinusI
+            EasyOutputMatrix[n-jMinusI,i]=v[i,j]
+        end
+    end
+    return EasyOutputMatrix
+end
