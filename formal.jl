@@ -297,25 +297,18 @@ end
 
 Terminal=Char
 NonTerminal=Char
+Production=Vector{Union{Terminal,NonTerminal}}
 
 struct CFG
     V:: Vector{NonTerminal}
     Σ:: Vector{Terminal}
-    P:: Dict{NonTerminal,Vector{Vector{Union{Terminal,NonTerminal}}}}
+    P:: Dict{NonTerminal,Vector{Production}}
     S:: NonTerminal
-    # first occuring NonTerm is S, uppercase letters are non-Terms, lower case are terms
-    # CFG(P)=(
-    #     V=P.keys ∪ [ v for (_,arr) in P.items for v in arr if isuppercase(v)],
-    #     Σ=[  ]
-    # )
 end
 
 function recognizeCFG(G, w)
-    V = G.V
-    Σ = G.Σ
-    P = G.P
-    S = G.S
-    
+    # TODO convert to CNF
+    return G.S ∈ CYK(G,w)[1,1]
 end
 
 function CYK(G,w)
@@ -345,3 +338,142 @@ function CYK(G,w)
     end
     return EasyOutputMatrix
 end
+
+# S->(S)S|eps in CFG:
+#
+# S->AB|AR|LB|LR
+# L->(
+# R->)
+# A->LS
+# B->RS
+# hilfreich :-).
+function inputCFG()
+    println("
+Enter the grammar you want to parse in the format A->A|B|CD|e|eps, line by line
+Please note:
+- Non-Terminals are single uppercase letters
+- Terminals are single lowercase letters or any other symbol
+- The first occuring non-terminal is the start symbol
+- eps represents the empty string
+
+")
+    return parseCFG(inputLineByLineUntilEmpty())
+end
+
+function inputLineByLineUntilEmpty()
+    lines=[]
+    while true
+        line = readline()
+        if line == ""
+            return lines
+        else
+            push!(lines, line)
+        end
+    end
+end
+
+isNonTerminal(c)=isuppercase(c)
+isTerminal(c)=!isNonTerminal(c)
+
+function parseCFG(inputLines)
+    S = inputLines[1][1]
+    if(!isNonTerminal(S))
+        error("The LHS of the first line must be the start symbol")
+    end
+    V = [ S ]
+    Σ = []
+    P = Dict{NonTerminal,Vector{Production}}()
+    for line ∈ inputLines
+        splitted = split(line, "->")
+        if(length(splitted)!=2 || length(splitted[1])!=1)
+            error("Line \""+line+"\" is not in the correct format")
+        end
+        LHS = splitted[1][1]
+        not(x)=!x
+        RHS = filter(not ∘ isspace,splitted[2]) #filter spaces
+        if(length(RHS) < 1)
+            error("Line \""+line+"\" is not in the correct format")
+        end
+        RHSSplit = split(RHS, "|")
+        for RHSItem in RHSSplit
+            RHSItem=replace(RHSItem, "eps"=>"")
+
+            terminals=unique(filter(isTerminal, RHSItem))
+            nonterminals=unique(filter(isNonTerminal, RHSItem))
+            if(nonterminals ∉ V)
+                append!(V, nonterminals)
+            end
+            if(terminals ∉ Σ)
+                append!(Σ, terminals)
+            end
+            if(!haskey(P,LHS))
+                P[LHS] = []
+            end
+            push!(P[LHS],collect(RHSItem))
+        end
+    end
+    @show P
+    return CFG(unique(V),unique(Σ),P,S)
+end
+
+function chomskyNormalizer(G)
+    # 1. step: remove A->aB etc.
+    # (assume that X_a's are not already in the grammar)
+    V′ = G.V
+    XVs = Dict{NonTerminal,Terminal} # new terminals to make A->aB into A->X_aB, X_a -> a
+    P′ = Dict{NonTerminal,Vector{Production}}()
+    for A in G.V
+        for p in G.P[A]
+            if length(p) == 1
+                push!(P′, p)
+            else
+                rightSideInConstruction= []
+                for c∈ p
+                    if isTerminal(c)
+                        constructed="X_$c" # weeeeell characters as nonterminals, huh?...
+                        if !haskey(XVs,constructed)
+                            XVs[constructed] = c
+                        end
+                        c=constructed
+                    end
+                    push!(rightSideInConstruction, c)
+                end
+            end
+        end
+    end
+    @show XVs
+end
+
+function main()
+    println("Ctrl+D to exit orderly!")
+    functionalities = [ 0 => "CYK Algorithm" ]
+    println("Choose ID what you want to do:")
+    println("<ID>: <functionality>")
+    for (id, name) ∈ functionalities
+        println("$id: $name")
+    end
+    read = readline()
+    if(read== "" && eof(stdin))
+        println("Exiting...")
+        exit(0)
+    end
+    if(read=="0") 
+        println("Input CFG in CNF:")
+        G = inputCFG()
+        while true
+            print("CYK Word?: ")
+            read = readline()
+            if(read == "" && eof(stdin))
+                println("Exiting...")
+                exit(0)
+            end
+            display(CYK(G, read))
+            println()
+        end
+    else
+        println("Invalid functionality, choose one from the list above")
+        exit(1)
+    end
+end
+
+main()
